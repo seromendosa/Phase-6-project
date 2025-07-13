@@ -178,6 +178,184 @@ class UIComponents:
         return dha_df, doh_df
     
     @staticmethod
+    def validate_data_quality(dha_df: pd.DataFrame, doh_df: pd.DataFrame) -> Dict:
+        """Validate data quality before processing"""
+        validation_results = {
+            'is_valid': True,
+            'warnings': [],
+            'errors': [],
+            'stats': {}
+        }
+        
+        # Check for required columns
+        if len(dha_df.columns) < 6:
+            validation_results['errors'].append("DHA file must have at least 6 columns")
+            validation_results['is_valid'] = False
+        
+        if len(doh_df.columns) < 6:
+            validation_results['errors'].append("DOH file must have at least 6 columns")
+            validation_results['is_valid'] = False
+        
+        if not validation_results['is_valid']:
+            return validation_results
+        
+        # Check for empty datasets
+        if len(dha_df) == 0:
+            validation_results['errors'].append("DHA file is empty")
+            validation_results['is_valid'] = False
+        
+        if len(doh_df) == 0:
+            validation_results['errors'].append("DOH file is empty")
+            validation_results['is_valid'] = False
+        
+        # Check for missing values in critical columns
+        try:
+            dha_missing_codes = dha_df.iloc[:, 0].isna().sum()
+        except:
+            dha_missing_codes = 0
+            
+        try:
+            dha_missing_brands = dha_df.iloc[:, 1].isna().sum()
+        except:
+            dha_missing_brands = 0
+            
+        try:
+            dha_missing_generics = dha_df.iloc[:, 2].isna().sum()
+        except:
+            dha_missing_generics = 0
+        
+        try:
+            doh_missing_codes = doh_df.iloc[:, 0].isna().sum()
+        except:
+            doh_missing_codes = 0
+            
+        try:
+            doh_missing_brands = doh_df.iloc[:, 1].isna().sum()
+        except:
+            doh_missing_brands = 0
+            
+        try:
+            doh_missing_generics = doh_df.iloc[:, 2].isna().sum()
+        except:
+            doh_missing_generics = 0
+        
+        if dha_missing_codes > 0:
+            validation_results['warnings'].append(f"DHA file has {dha_missing_codes} missing drug codes")
+        
+        if dha_missing_brands > 0:
+            validation_results['warnings'].append(f"DHA file has {dha_missing_brands} missing brand names")
+        
+        if dha_missing_generics > 0:
+            validation_results['warnings'].append(f"DHA file has {dha_missing_generics} missing generic names")
+        
+        if doh_missing_codes > 0:
+            validation_results['warnings'].append(f"DOH file has {doh_missing_codes} missing drug codes")
+        
+        if doh_missing_brands > 0:
+            validation_results['warnings'].append(f"DOH file has {doh_missing_brands} missing brand names")
+        
+        if doh_missing_generics > 0:
+            validation_results['warnings'].append(f"DOH file has {doh_missing_generics} missing generic names")
+        
+        # Check for duplicates
+        dha_duplicate_codes = dha_df.iloc[:, 0].duplicated().sum()
+        doh_duplicate_codes = doh_df.iloc[:, 0].duplicated().sum()
+        
+        if dha_duplicate_codes > 0:
+            validation_results['warnings'].append(f"DHA file has {dha_duplicate_codes} duplicate drug codes")
+        
+        if doh_duplicate_codes > 0:
+            validation_results['warnings'].append(f"DOH file has {doh_duplicate_codes} duplicate drug codes")
+        
+        # Check price data quality
+        dha_prices = pd.to_numeric(dha_df.iloc[:, 5], errors='coerce')
+        doh_prices = pd.to_numeric(doh_df.iloc[:, 5], errors='coerce')
+        
+        dha_invalid_prices = dha_prices.isna().sum()
+        doh_invalid_prices = doh_prices.isna().sum()
+        
+        if dha_invalid_prices > 0:
+            validation_results['warnings'].append(f"DHA file has {dha_invalid_prices} invalid price values")
+        
+        if doh_invalid_prices > 0:
+            validation_results['warnings'].append(f"DOH file has {doh_invalid_prices} invalid price values")
+        
+        # Check for negative prices
+        if isinstance(dha_prices, pd.Series):
+            dha_negative_prices = (dha_prices < 0).sum()
+            if dha_negative_prices > 0:
+                validation_results['warnings'].append(f"DHA file has {dha_negative_prices} negative prices")
+        
+        if isinstance(doh_prices, pd.Series):
+            doh_negative_prices = (doh_prices < 0).sum()
+            if doh_negative_prices > 0:
+                validation_results['warnings'].append(f"DOH file has {doh_negative_prices} negative prices")
+        
+        # Compile statistics
+        validation_results['stats'] = {
+            'dha_total': len(dha_df),
+            'doh_total': len(doh_df),
+            'dha_missing_codes': dha_missing_codes,
+            'dha_missing_brands': dha_missing_brands,
+            'dha_missing_generics': dha_missing_generics,
+            'doh_missing_codes': doh_missing_codes,
+            'doh_missing_brands': doh_missing_brands,
+            'doh_missing_generics': doh_missing_generics,
+            'dha_duplicates': dha_duplicate_codes,
+            'doh_duplicates': doh_duplicate_codes,
+            'dha_invalid_prices': dha_invalid_prices,
+            'doh_invalid_prices': doh_invalid_prices
+        }
+        
+        return validation_results
+    
+    @staticmethod
+    def render_data_validation(validation_results: Dict):
+        """Render data validation results"""
+        st.subheader("🔍 Data Quality Validation")
+        
+        if validation_results['is_valid']:
+            st.success("✅ Data validation passed!")
+        else:
+            st.error("❌ Data validation failed!")
+        
+        # Show statistics
+        stats = validation_results['stats']
+        col1, col2 = st.columns(2)
+        
+        with col1:
+            st.write("**DHA File Statistics:**")
+            st.write(f"- Total drugs: {stats['dha_total']}")
+            st.write(f"- Missing codes: {stats['dha_missing_codes']}")
+            st.write(f"- Missing brands: {stats['dha_missing_brands']}")
+            st.write(f"- Missing generics: {stats['dha_missing_generics']}")
+            st.write(f"- Duplicate codes: {stats['dha_duplicates']}")
+            st.write(f"- Invalid prices: {stats['dha_invalid_prices']}")
+        
+        with col2:
+            st.write("**DOH File Statistics:**")
+            st.write(f"- Total drugs: {stats['doh_total']}")
+            st.write(f"- Missing codes: {stats['doh_missing_codes']}")
+            st.write(f"- Missing brands: {stats['doh_missing_brands']}")
+            st.write(f"- Missing generics: {stats['doh_missing_generics']}")
+            st.write(f"- Duplicate codes: {stats['doh_duplicates']}")
+            st.write(f"- Invalid prices: {stats['doh_invalid_prices']}")
+        
+        # Show warnings
+        if validation_results['warnings']:
+            st.warning("⚠️ **Warnings:**")
+            for warning in validation_results['warnings']:
+                st.write(f"- {warning}")
+        
+        # Show errors
+        if validation_results['errors']:
+            st.error("❌ **Errors:**")
+            for error in validation_results['errors']:
+                st.write(f"- {error}")
+        
+        return validation_results['is_valid']
+    
+    @staticmethod
     def render_matching_process(dha_df: pd.DataFrame, doh_df: pd.DataFrame, config: Dict):
         """Render matching process section"""
         st.header("🔍 Drug Matching Process")
@@ -186,6 +364,15 @@ class UIComponents:
         if len(dha_df.columns) < 6 or len(doh_df.columns) < 6:
             st.error("❌ Both files must have at least 6 columns (including Price column)")
             return None
+        
+        # Data quality validation
+        with st.expander("🔍 Data Quality Check", expanded=True):
+            validation_results = UIComponents.validate_data_quality(dha_df, doh_df)
+            is_valid = UIComponents.render_data_validation(validation_results)
+            
+            if not is_valid:
+                st.error("❌ Please fix data quality issues before proceeding")
+                return None
         
         # Show dataset info
         col1, col2, col3 = st.columns(3)
@@ -226,12 +413,21 @@ class UIComponents:
                 else:
                     st.write("- Could not process price data")
         
-        if st.button("🚀 Start Matching Process", type="primary"):
-            return {
-                'dha_df': dha_df,
-                'doh_df': doh_df,
-                'config': config
-            }
+        # Add partial results export option
+        col1, col2 = st.columns(2)
+        
+        with col1:
+            if st.button("🚀 Start Matching Process", type="primary"):
+                return {
+                    'dha_df': dha_df,
+                    'doh_df': doh_df,
+                    'config': config
+                }
+        
+        with col2:
+            if st.button("💾 Export Partial Results", help="Export current results if processing was interrupted"):
+                # This will be handled in the main app
+                st.info("Partial results export will be available during processing")
         
         return None
     

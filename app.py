@@ -14,8 +14,8 @@ sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 
 from config import Config
 from database.manager import DatabaseManager
-from processing.matchers import DrugMatcher
-from processing.text_processor import DrugTextProcessor
+from processing.matchers import EnhancedDrugMatcher as DrugMatcher
+from processing.text_processor import EnhancedDrugTextProcessor as DrugTextProcessor
 from reporting.excel_generator import ExcelReportGenerator
 from ui.components import UIComponents
 
@@ -188,7 +188,7 @@ ALTER TABLE drug_matches ADD COLUMN IF NOT EXISTS price_similarity FLOAT DEFAULT
     
     def _match_drugs(self, dha_df: pd.DataFrame, doh_df: pd.DataFrame, 
                     threshold: float, weights: Dict, session_id: str = "") -> List[Dict]:
-        """Internal method to perform drug matching"""
+        """Internal method to perform drug matching with one-to-many (all above threshold) matching"""
         matches = []
         unmatched_dha_count = 0
         unmatched_doh_count = 0
@@ -204,6 +204,7 @@ ALTER TABLE drug_matches ADD COLUMN IF NOT EXISTS price_similarity FLOAT DEFAULT
         # Prepare DOH generics for vectorizer training
         doh_generics = doh_df.iloc[:, 2].tolist() if len(doh_df.columns) > 2 else []
         
+        # Initialize progress tracking
         progress_bar = st.progress(0)
         status_text = st.empty()
         
@@ -211,170 +212,55 @@ ALTER TABLE drug_matches ADD COLUMN IF NOT EXISTS price_similarity FLOAT DEFAULT
         saved_count = 0
         processed_count = 0
         
-        for idx, (_, dha_row) in enumerate(dha_df.iterrows()):
-            progress = (idx + 1) / total_dha
-            progress_bar.progress(progress)
-            status_text.text(f'Processing DHA drug {idx + 1} of {total_dha} (Processed: {processed_count})')
-            
-            best_match = None
-            best_score = 0
-            best_doh_code = None
-            
-            # Extract DHA drug info
-            dha_code = str(dha_row.iloc[0]) if len(dha_row) > 0 else ""
-            dha_brand = str(dha_row.iloc[1]) if len(dha_row) > 1 else ""
-            dha_generic = str(dha_row.iloc[2]) if len(dha_row) > 2 else ""
-            dha_strength = str(dha_row.iloc[3]) if len(dha_row) > 3 else ""
-            dha_dosage = str(dha_row.iloc[4]) if len(dha_row) > 4 else ""
-            dha_price = st.session_state.matcher.processor.clean_price(dha_row.iloc[5]) if len(dha_row) > 5 else 0.0
-            
-            # Check if any DOH drugs exist
-            if len(doh_df) == 0:
-                # No DOH drugs to match against
-                if st.session_state.db_manager:
-                    dha_drug_data = {
-                        'code': dha_code,
-                        'brand_name': dha_brand,
-                        'generic_name': dha_generic,
-                        'strength': dha_strength,
-                        'dosage_form': dha_dosage,
-                        'price': dha_price
-                    }
-                    st.session_state.db_manager.save_unmatched_drug(
-                        dha_drug_data, 'DHA', 0.0, None, "No DOH drugs available"
-                    )
-                unmatched_dha_count += 1
-                continue
-            
-            for _, doh_row in doh_df.iterrows():
-                # Extract DOH drug info
-                doh_code = str(doh_row.iloc[0]) if len(doh_row) > 0 else ""
-                doh_brand = str(doh_row.iloc[1]) if len(doh_row) > 1 else ""
-                doh_generic = str(doh_row.iloc[2]) if len(doh_row) > 2 else ""
-                doh_strength = str(doh_row.iloc[3]) if len(doh_row) > 3 else ""
-                doh_dosage = str(doh_row.iloc[4]) if len(doh_row) > 4 else ""
-                doh_price = st.session_state.matcher.processor.clean_price(doh_row.iloc[5]) if len(doh_row) > 5 else 0.0
-                
-                # Calculate similarities
-                brand_sim = st.session_state.matcher.calculate_brand_similarity(dha_brand, doh_brand)
-                strength_sim = st.session_state.matcher.calculate_strength_similarity(dha_strength, doh_strength)
-                dosage_sim = st.session_state.matcher.calculate_dosage_similarity(dha_dosage, doh_dosage)
-                price_sim = st.session_state.matcher.price_matcher.calculate_price_similarity(dha_price, doh_price)
-                
-                # Generic name matching with multiple methods
-                generic_match = st.session_state.matcher.generic_matcher.best_match(
-                    dha_generic, doh_generic, doh_generics
-                )
-                generic_sim = generic_match['final_score']
-
-                # --- Advanced Conditional Weighting Logic ---
-                # Default weights
-                applied_weights = weights.copy()
-                manual_review_flag = False
-                
-                if brand_sim >= 0.95:
-                    if strength_sim >= 0.95 and dosage_sim >= 0.95:
-                        # Brand, strength, and dosage are all nearly identical: ignore generic
-                        applied_weights = {
-                            'brand': 0.20,
-                            'generic': 0.00,
-                            'strength': 0.40,
-                            'dosage': 0.25,
-                            'price': 0.15
-                        }
-                    else:
-                        # Brand is nearly identical, generic less important
-                        applied_weights = {
-                            'brand': 0.20,
-                            'generic': 0.00,
-                            'strength': 0.35,
-                            'dosage': 0.30,
-                            'price': 0.15
-                        }
-                        # Flag for manual review if strength or dosage is low
-                        if strength_sim < 0.8 or dosage_sim < 0.8:
-                            manual_review_flag = True
-                elif brand_sim >= 0.90:
-                    # Brand is very close, generic less important
-                    applied_weights = {
-                        'brand': 0.20,
-                        'generic': 0.10,
-                        'strength': 0.30,
-                        'dosage': 0.25,
-                        'price': 0.15
-                    }
-                else:
-                    # Brand not close, generic is important
-                    applied_weights = weights.copy()
-                # Normalize weights
-                total_weight = sum(applied_weights.values())
-                if total_weight > 0:
-                    for k in applied_weights:
-                        applied_weights[k] = applied_weights[k] / total_weight
-                # --- End Advanced Logic ---
-
-                # Calculate overall score with applied weights
-                overall_score = (
-                    brand_sim * applied_weights['brand'] +
-                    strength_sim * applied_weights['strength'] +
-                    dosage_sim * applied_weights['dosage'] +
-                    generic_sim * applied_weights['generic'] +
-                    price_sim * applied_weights['price']
-                )
-                
-                # Track best score for this DHA drug
-                if overall_score > best_score:
-                    best_score = overall_score
-                    best_doh_code = doh_code
-                
-                if overall_score >= threshold:
-                    confidence_level = st.session_state.matcher.get_confidence_level(overall_score)
+        # Batch processing configuration
+        BATCH_SIZE = 100  # Process 100 drugs at a time
+        checkpoint_interval = 50  # Save checkpoint every 50 drugs
+        
+        # Resume functionality - check for existing progress
+        start_index = 0
+        if st.session_state.db_manager:
+            try:
+                # Check if we have existing matches for this session
+                existing_matches = st.session_state.db_manager.get_matched_drugs()
+                if existing_matches:
+                    # Find the last processed DHA code
+                    processed_dha_codes = {match.dha_code for match in existing_matches}
+                    for idx, (_, dha_row) in enumerate(dha_df.iterrows()):
+                        dha_code = str(dha_row.iloc[0]) if len(dha_row) > 0 else ""
+                        if dha_code not in processed_dha_codes:
+                            start_index = idx
+                            break
                     
-                    best_match = {
-                        'DHA_Code': dha_code,
-                        'DOH_Code': doh_code,
-                        'DHA_Brand_Name': dha_brand,
-                        'DOH_Brand_Name': doh_brand,
-                        'DHA_Generic_Name': dha_generic,
-                        'DOH_Generic_Name': doh_generic,
-                        'DHA_Strength': dha_strength,
-                        'DOH_Strength': doh_strength,
-                        'DHA_Dosage_Form': dha_dosage,
-                        'DOH_Dosage_Form': doh_dosage,
-                        'DHA_Price': float(dha_price),
-                        'DOH_Price': float(doh_price),
-                        'Brand_Similarity': float(round(brand_sim, 3)),
-                        'Generic_Similarity': float(round(generic_sim, 3)),
-                        'Strength_Similarity': float(round(strength_sim, 3)),
-                        'Dosage_Similarity': float(round(dosage_sim, 3)),
-                        'Price_Similarity': float(round(price_sim, 3)),
-                        'Overall_Score': float(round(overall_score, 3)),
-                        'Confidence_Level': confidence_level,
-                        'Fuzzy_Score': float(round(generic_match['fuzzy_score'], 3)),
-                        'Vector_Score': float(round(generic_match['vector_score'], 3)),
-                        'Semantic_Score': float(round(generic_match['semantic_score'], 3)),
-                        'Matching_Method': generic_match['method'],
-                        'Matched_At': datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
-                        'Applied_Weights': applied_weights,
-                        'Manual_Review_Flag': manual_review_flag
-                    }
-                    best_score = overall_score
+                    if start_index > 0:
+                        st.info(f"🔄 Resuming from drug {start_index + 1} of {total_dha} (found {len(processed_dha_codes)} already processed)")
+                        # Load existing matches
+                        matches = [match.to_dict() for match in existing_matches]
+                        saved_count = len(matches)
+                        processed_count = start_index
+            except Exception as e:
+                st.warning(f"⚠️ Could not check for existing progress: {str(e)}")
+        
+        # Process drugs in batches
+        for batch_start in range(start_index, total_dha, BATCH_SIZE):
+            batch_end = min(batch_start + BATCH_SIZE, total_dha)
+            batch_dha = dha_df.iloc[batch_start:batch_end]
             
-            if best_match:
-                matches.append(best_match)
+            # Process each drug in the current batch
+            for idx, (_, dha_row) in enumerate(batch_dha.iterrows()):
+                actual_idx = batch_start + idx
+                progress = (actual_idx + 1) / total_dha
+                progress_bar.progress(progress)
+                status_text.text(f'Processing DHA drug {actual_idx + 1} of {total_dha} (Batch {batch_start//BATCH_SIZE + 1}, Processed: {processed_count})')
                 
-                # Save to database immediately if connected
-                if st.session_state.db_manager:
-                    try:
-                        st.session_state.db_manager.save_match(best_match)
-                        saved_count += 1
-                    except Exception as e:
-                        st.warning(f"⚠️ Could not save match to database: {str(e)}")
-                processed_count += 1
-            else:
-                # Save unmatched DHA drug
-                if st.session_state.db_manager:
-                    try:
+                dha_code = str(dha_row.iloc[0]) if len(dha_row) > 0 else ""
+                dha_brand = str(dha_row.iloc[1]) if len(dha_row) > 1 else ""
+                dha_generic = str(dha_row.iloc[2]) if len(dha_row) > 2 else ""
+                dha_strength = str(dha_row.iloc[3]) if len(dha_row) > 3 else ""
+                dha_dosage = str(dha_row.iloc[4]) if len(dha_row) > 4 else ""
+                dha_price = st.session_state.matcher.processor.clean_price(dha_row.iloc[5]) if len(dha_row) > 5 else 0.0
+                
+                if len(doh_df) == 0:
+                    if st.session_state.db_manager:
                         dha_drug_data = {
                             'code': dha_code,
                             'brand_name': dha_brand,
@@ -383,14 +269,165 @@ ALTER TABLE drug_matches ADD COLUMN IF NOT EXISTS price_similarity FLOAT DEFAULT
                             'dosage_form': dha_dosage,
                             'price': dha_price
                         }
-                        search_reason = f"Best score {best_score:.3f} below threshold {threshold}"
                         st.session_state.db_manager.save_unmatched_drug(
-                            dha_drug_data, 'DHA', best_score, best_doh_code, search_reason
+                            dha_drug_data, 'DHA', 0.0, None, "No DOH drugs available"
                         )
-                    except Exception as e:
-                        st.warning(f"⚠️ Could not save unmatched DHA drug to database: {str(e)}")
-                unmatched_dha_count += 1
-                processed_count += 1
+                    unmatched_dha_count += 1
+                    processed_count += 1
+                    continue
+                
+                # --- One-to-many matching logic ---
+                matches_for_this_dha = []
+                best_score = 0
+                best_match = None
+                best_doh_code = None
+                
+                for _, doh_row in doh_df.iterrows():
+                    doh_code = str(doh_row.iloc[0]) if len(doh_row) > 0 else ""
+                    doh_brand = str(doh_row.iloc[1]) if len(doh_row) > 1 else ""
+                    doh_generic = str(doh_row.iloc[2]) if len(doh_row) > 2 else ""
+                    doh_strength = str(doh_row.iloc[3]) if len(doh_row) > 3 else ""
+                    doh_dosage = str(doh_row.iloc[4]) if len(doh_row) > 4 else ""
+                    doh_price = st.session_state.matcher.processor.clean_price(doh_row.iloc[5]) if len(doh_row) > 5 else 0.0
+                    
+                    brand_sim = st.session_state.matcher.calculate_brand_similarity(dha_brand, doh_brand)
+                    strength_sim = st.session_state.matcher.calculate_strength_similarity(dha_strength, doh_strength)
+                    dosage_sim = st.session_state.matcher.calculate_dosage_similarity(dha_dosage, doh_dosage)
+                    price_sim = st.session_state.matcher.price_matcher.calculate_price_similarity(dha_price, doh_price)
+                    generic_match = st.session_state.matcher.generic_matcher.best_match(
+                        dha_generic, doh_generic, doh_generics
+                    )
+                    generic_sim = generic_match['final_score']
+
+                    applied_weights = weights.copy()
+                    manual_review_flag = False
+                    if brand_sim >= 0.95:
+                        if strength_sim >= 0.95 and dosage_sim >= 0.95:
+                            applied_weights = {
+                                'brand': 0.20,
+                                'generic': 0.00,
+                                'strength': 0.40,
+                                'dosage': 0.25,
+                                'price': 0.15
+                            }
+                        else:
+                            applied_weights = {
+                                'brand': 0.20,
+                                'generic': 0.00,
+                                'strength': 0.35,
+                                'dosage': 0.30,
+                                'price': 0.15
+                            }
+                            if strength_sim < 0.8 or dosage_sim < 0.8:
+                                manual_review_flag = True
+                    elif brand_sim >= 0.90:
+                        applied_weights = {
+                            'brand': 0.20,
+                            'generic': 0.10,
+                            'strength': 0.30,
+                            'dosage': 0.25,
+                            'price': 0.15
+                        }
+                    else:
+                        applied_weights = weights.copy()
+                    total_weight = sum(applied_weights.values())
+                    if total_weight > 0:
+                        for k in applied_weights:
+                            applied_weights[k] = applied_weights[k] / total_weight
+
+                    overall_score = (
+                        brand_sim * applied_weights['brand'] +
+                        strength_sim * applied_weights['strength'] +
+                        dosage_sim * applied_weights['dosage'] +
+                        generic_sim * applied_weights['generic'] +
+                        price_sim * applied_weights['price']
+                    )
+
+                    if overall_score > best_score:
+                        best_score = overall_score
+                        best_doh_code = doh_code
+                        best_match = None  # Will be set below
+
+                    if overall_score >= threshold:
+                        confidence_level = st.session_state.matcher.get_confidence_level(overall_score)
+                        match = {
+                            'DHA_Code': dha_code,
+                            'DOH_Code': doh_code,
+                            'DHA_Brand_Name': dha_brand,
+                            'DOH_Brand_Name': doh_brand,
+                            'DHA_Generic_Name': dha_generic,
+                            'DOH_Generic_Name': doh_generic,
+                            'DHA_Strength': dha_strength,
+                            'DOH_Strength': doh_strength,
+                            'DHA_Dosage_Form': dha_dosage,
+                            'DOH_Dosage_Form': doh_dosage,
+                            'DHA_Price': float(dha_price),
+                            'DOH_Price': float(doh_price),
+                            'Brand_Similarity': float(round(brand_sim, 3)),
+                            'Generic_Similarity': float(round(generic_sim, 3)),
+                            'Strength_Similarity': float(round(strength_sim, 3)),
+                            'Dosage_Similarity': float(round(dosage_sim, 3)),
+                            'Price_Similarity': float(round(price_sim, 3)),
+                            'Overall_Score': float(round(overall_score, 3)),
+                            'Confidence_Level': confidence_level,
+                            'Fuzzy_Score': float(round(generic_match['fuzzy_score'], 3)),
+                            'Vector_Score': float(round(generic_match['vector_score'], 3)),
+                            'Semantic_Score': float(round(generic_match['semantic_score'], 3)),
+                            'Matching_Method': generic_match['method'],
+                            'Matched_At': datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
+                            'Applied_Weights': applied_weights,
+                            'Manual_Review_Flag': manual_review_flag,
+                            'Is_Best_Match': False  # Will be set later
+                        }
+                        matches_for_this_dha.append(match)
+
+                # After all DOH drugs, flag the best match (if any)
+                if matches_for_this_dha:
+                    # Find the match with the highest score
+                    best_idx = max(range(len(matches_for_this_dha)), key=lambda i: matches_for_this_dha[i]['Overall_Score'])
+                    matches_for_this_dha[best_idx]['Is_Best_Match'] = True
+                    matches.extend(matches_for_this_dha)
+                    # Save all matches to DB
+                    if st.session_state.db_manager:
+                        for match in matches_for_this_dha:
+                            try:
+                                st.session_state.db_manager.save_match(match)
+                                saved_count += 1
+                            except Exception as e:
+                                st.warning(f"⚠️ Could not save match to database: {str(e)}")
+                    processed_count += 1
+                else:
+                    # Save unmatched DHA drug
+                    if st.session_state.db_manager:
+                        try:
+                            dha_drug_data = {
+                                'code': dha_code,
+                                'brand_name': dha_brand,
+                                'generic_name': dha_generic,
+                                'strength': dha_strength,
+                                'dosage_form': dha_dosage,
+                                'price': dha_price
+                            }
+                            search_reason = f"No matches above threshold {threshold}"
+                            st.session_state.db_manager.save_unmatched_drug(
+                                dha_drug_data, 'DHA', best_score, best_doh_code, search_reason
+                            )
+                        except Exception as e:
+                            st.warning(f"⚠️ Could not save unmatched DHA drug to database: {str(e)}")
+                    unmatched_dha_count += 1
+                    processed_count += 1
+                
+                # Checkpoint saving every N drugs
+                if processed_count % checkpoint_interval == 0:
+                    if st.session_state.db_manager:
+                        try:
+                            st.info(f"💾 Checkpoint saved at drug {processed_count}")
+                        except Exception as e:
+                            st.warning(f"⚠️ Could not save checkpoint: {str(e)}")
+            
+            # Batch completion notification
+            if batch_end < total_dha:
+                st.success(f"✅ Batch {batch_start//BATCH_SIZE + 1} completed: {batch_end} of {total_dha} drugs processed")
         
         progress_bar.empty()
         status_text.empty()
@@ -399,6 +436,8 @@ ALTER TABLE drug_matches ADD COLUMN IF NOT EXISTS price_similarity FLOAT DEFAULT
             st.success(f"✅ Matching completed! {saved_count} matches and {unmatched_dha_count} unmatched DHA drugs saved to database. Total processed: {processed_count}")
         
         return matches
+    
+
     
     def render_download_section(self, filtered_df: pd.DataFrame, results_df: pd.DataFrame):
         """Render download section"""

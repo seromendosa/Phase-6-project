@@ -1,276 +1,206 @@
 """
-Matching algorithms for drug comparison
+Enhanced Drug Matching Algorithms
+Includes combination drug support and improved similarity calculations
 """
-import streamlit as st
-import re
-from fuzzywuzzy import fuzz
+import pandas as pd
+import numpy as np
+from typing import Dict, List, Optional, Tuple
 from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.metrics.pairwise import cosine_similarity
-from typing import Dict, List, Optional
-from config import Config
+from fuzzywuzzy import fuzz
+from processing.text_processor import EnhancedDrugTextProcessor
+from processing.price_matcher import PriceMatcher
 
-class PriceMatcher:
-    """Class for price similarity calculations"""
-    
-    def __init__(self, tolerance_percentage: Optional[float] = None, max_ratio: Optional[float] = None):
-        self.tolerance_percentage = tolerance_percentage or Config.DEFAULT_PRICE_TOLERANCE
-        self.max_ratio = max_ratio or Config.DEFAULT_MAX_PRICE_RATIO
-    
-    def calculate_price_similarity(self, price1: float, price2: float) -> float:
-        """
-        Calculate price similarity between two prices
-        
-        Args:
-            price1: First price
-            price2: Second price
-            
-        Returns:
-            Similarity score between 0 and 1
-        """
-        # Handle cases where one or both prices are 0 or invalid
-        if price1 <= 0 or price2 <= 0:
-            return 0.0
-        
-        # Calculate percentage difference
-        avg_price = (price1 + price2) / 2
-        price_diff = abs(price1 - price2)
-        percentage_diff = (price_diff / avg_price) * 100
-        
-        # Perfect match within tolerance
-        if percentage_diff <= self.tolerance_percentage:
-            return 1.0
-        
-        # Calculate ratio-based similarity
-        ratio = max(price1, price2) / min(price1, price2)
-        
-        # If ratio is too high, return 0
-        if ratio > self.max_ratio:
-            return 0.0
-        
-        # Linear decay based on ratio
-        # ratio 1.0 -> similarity 1.0
-        # ratio max_ratio -> similarity 0.0
-        similarity = max(0.0, 1.0 - (ratio - 1.0) / (self.max_ratio - 1.0))
-        
-        return similarity
-    
-    def get_price_analysis(self, price1: float, price2: float) -> Dict:
-        """Get detailed price analysis"""
-        if price1 <= 0 or price2 <= 0:
-            return {
-                'similarity': 0.0,
-                'difference': 'N/A',
-                'percentage_diff': 'N/A',
-                'ratio': 'N/A',
-                'analysis': 'Invalid price data'
-            }
-        
-        similarity = self.calculate_price_similarity(price1, price2)
-        difference = abs(price1 - price2)
-        avg_price = (price1 + price2) / 2
-        percentage_diff = (difference / avg_price) * 100
-        ratio = max(price1, price2) / min(price1, price2)
-        
-        # Analysis text
-        if similarity >= 0.9:
-            analysis = "Excellent price match"
-        elif similarity >= 0.7:
-            analysis = "Good price match"
-        elif similarity >= 0.5:
-            analysis = "Moderate price difference"
-        elif similarity >= 0.3:
-            analysis = "Significant price difference"
-        else:
-            analysis = "Large price difference"
-        
-        return {
-            'similarity': similarity,
-            'difference': difference,
-            'percentage_diff': percentage_diff,
-            'ratio': ratio,
-            'analysis': analysis
-        }
-
-class GenericNameMatcher:
-    """Multiple approaches for generic name matching"""
+class EnhancedGenericNameMatcher:
+    """Enhanced generic name matcher with combination drug support"""
     
     def __init__(self):
-        from processing.text_processor import DrugTextProcessor
-        self.processor = DrugTextProcessor()
+        self.processor = EnhancedDrugTextProcessor()
         self.vectorizer = None
+        self.tfidf_matrix = None
+        self.generic_names = []
+        
+    def train_vectorizer(self, generic_names: List[str]):
+        """Train TF-IDF vectorizer on generic names"""
+        if not generic_names:
+            return
+        
+        # Clean and normalize generic names
+        cleaned_names = []
+        for name in generic_names:
+            if name and pd.notna(name):
+                # Handle combination drugs
+                drugs = self.processor.extract_combination_drugs(str(name))
+                cleaned_names.extend(drugs)
+        
+        if not cleaned_names:
+            return
+        
+        # Remove duplicates and empty strings
+        cleaned_names = list(set([name for name in cleaned_names if name.strip()]))
+        
+        # Train vectorizer
+        self.vectorizer = TfidfVectorizer(
+            analyzer='word',
+            ngram_range=(1, 3),
+            min_df=1,
+            max_df=0.9,
+            stop_words=None
+        )
+        
+        self.tfidf_matrix = self.vectorizer.fit_transform(cleaned_names)
+        self.generic_names = cleaned_names
     
-    def fuzzy_match(self, name1: str, name2: str) -> float:
-        """Simple fuzzy string matching"""
-        if not name1 or not name2:
-            return 0.0
+    def best_match(self, query_generic: str, target_generic: str, all_generics: Optional[List[str]] = None) -> Dict:
+        """Find best match using multiple algorithms including combination drug support"""
+        if not query_generic or not target_generic:
+            return {
+                'final_score': 0.0,
+                'fuzzy_score': 0.0,
+                'vector_score': 0.0,
+                'semantic_score': 0.0,
+                'method': 'none'
+            }
         
-        # Clean names
-        clean1 = self.processor.clean_text(name1)
-        clean2 = self.processor.clean_text(name2)
+        # Extract combination drugs
+        query_drugs = self.processor.extract_combination_drugs(query_generic)
+        target_drugs = self.processor.extract_combination_drugs(target_generic)
         
-        # Multiple fuzzy matching approaches
-        ratio = fuzz.ratio(clean1, clean2)
-        partial_ratio = fuzz.partial_ratio(clean1, clean2)
-        token_sort = fuzz.token_sort_ratio(clean1, clean2)
-        token_set = fuzz.token_set_ratio(clean1, clean2)
+        # Calculate combination similarity
+        combination_sim = self.processor.calculate_combination_similarity(query_generic, target_generic)
         
-        # Weighted average
-        score = (ratio * 0.3 + partial_ratio * 0.2 + token_sort * 0.25 + token_set * 0.25) / 100
+        # Calculate individual similarity scores
+        fuzzy_score = fuzz.ratio(query_generic.upper(), target_generic.upper()) / 100.0
         
-        return score
-    
-    def vectorized_match(self, name1: str, name2: str, doh_generics: Optional[List[str]] = None) -> float:
-        """TF-IDF vectorized matching"""
-        if not name1 or not name2:
-            return 0.0
+        # Vector similarity (if vectorizer is trained)
+        vector_score = 0.0
+        if self.vectorizer is not None and all_generics:
+            try:
+                query_vector = self.vectorizer.transform([query_generic])
+                target_vector = self.vectorizer.transform([target_generic])
+                vector_score = cosine_similarity(query_vector, target_vector)[0][0]
+            except:
+                vector_score = 0.0
         
-        try:
-            # Clean names
-            clean1 = self.processor.clean_text(name1)
-            clean2 = self.processor.clean_text(name2)
-            
-            # Create or use existing vectorizer
-            if self.vectorizer is None and doh_generics:
-                # Train vectorizer on DOH generics
-                all_generics = [self.processor.clean_text(g) for g in doh_generics if g]
-                all_generics.extend([clean1, clean2])
-                
-                self.vectorizer = TfidfVectorizer(
-                    ngram_range=(1, 2),
-                    analyzer='word',
-                    stop_words=None,
-                    max_features=1000
-                )
-                self.vectorizer.fit(all_generics)
-            
-            if self.vectorizer:
-                # Vectorize the two names
-                vec1 = self.vectorizer.transform([clean1])
-                vec2 = self.vectorizer.transform([clean2])
-                
-                # Calculate cosine similarity
-                similarity = cosine_similarity(vec1, vec2)[0][0]
-                return similarity
-            
-        except Exception as e:
-            st.warning(f"Vectorized matching error: {e}")
+        # Phonetic similarity
+        phonetic_score = self.processor.calculate_phonetic_similarity(query_generic, target_generic)
         
-        # Fallback to fuzzy matching
-        return self.fuzzy_match(name1, name2)
-    
-    def semantic_match(self, name1: str, name2: str) -> float:
-        """Semantic matching based on drug name patterns"""
-        if not name1 or not name2:
-            return 0.0
+        # Weighted combination of scores
+        final_score = (
+            combination_sim * 0.4 +
+            fuzzy_score * 0.3 +
+            vector_score * 0.2 +
+            phonetic_score * 0.1
+        )
         
-        clean1 = self.processor.clean_text(name1)
-        clean2 = self.processor.clean_text(name2)
-        
-        # Extract potential active ingredients (first few words)
-        words1 = clean1.split()[:3]  # First 3 words usually contain active ingredient
-        words2 = clean2.split()[:3]
-        
-        # Check for exact matches in key words
-        exact_matches = len(set(words1) & set(words2))
-        total_unique = len(set(words1) | set(words2))
-        
-        if total_unique == 0:
-            return 0.0
-        
-        semantic_score = exact_matches / total_unique
-        
-        # Combine with fuzzy score
-        fuzzy_score = self.fuzzy_match(name1, name2)
-        
-        return (semantic_score * 0.6 + fuzzy_score * 0.4)
-    
-    def best_match(self, name1: str, name2: str, doh_generics: Optional[List[str]] = None) -> Dict:
-        """Get best match using all methods"""
-        fuzzy_score = self.fuzzy_match(name1, name2)
-        vector_score = self.vectorized_match(name1, name2, doh_generics)
-        semantic_score = self.semantic_match(name1, name2)
-        
-        # Weighted combination
-        final_score = (fuzzy_score * 0.4 + vector_score * 0.35 + semantic_score * 0.25)
+        # Determine method used
+        if combination_sim > 0.8:
+            method = 'combination'
+        elif fuzzy_score > 0.8:
+            method = 'fuzzy'
+        elif vector_score > 0.8:
+            method = 'vector'
+        elif phonetic_score > 0.8:
+            method = 'phonetic'
+        else:
+            method = 'combined'
         
         return {
+            'final_score': final_score,
             'fuzzy_score': fuzzy_score,
             'vector_score': vector_score,
-            'semantic_score': semantic_score,
-            'final_score': final_score,
-            'method': 'hybrid'
+            'semantic_score': combination_sim,
+            'phonetic_score': phonetic_score,
+            'method': method
         }
 
-class DrugMatcher:
-    """Main drug matching class with price support"""
+class EnhancedDrugMatcher:
+    """Enhanced drug matcher with improved algorithms"""
     
     def __init__(self, db_manager=None):
-        from processing.text_processor import DrugTextProcessor
-        self.processor = DrugTextProcessor()
-        self.generic_matcher = GenericNameMatcher()
-        self.price_matcher = PriceMatcher()
         self.db_manager = db_manager
-    
+        self.processor = EnhancedDrugTextProcessor()
+        self.generic_matcher = EnhancedGenericNameMatcher()
+        self.price_matcher = PriceMatcher()
+        
     def calculate_brand_similarity(self, brand1: str, brand2: str) -> float:
-        """Calculate brand name similarity"""
+        """Calculate brand name similarity with enhanced processing"""
         if not brand1 or not brand2:
             return 0.0
         
-        clean1 = self.processor.clean_text(brand1)
-        clean2 = self.processor.clean_text(brand2)
+        # Normalize brand names
+        norm_brand1 = self.processor.normalize_text(brand1)
+        norm_brand2 = self.processor.normalize_text(brand2)
         
-        return fuzz.ratio(clean1, clean2) / 100
+        # Exact match
+        if norm_brand1 == norm_brand2:
+            return 1.0
+        
+        # Fuzzy matching
+        fuzzy_score = fuzz.ratio(norm_brand1, norm_brand2) / 100.0
+        
+        # Phonetic matching
+        phonetic_score = self.processor.calculate_phonetic_similarity(norm_brand1, norm_brand2)
+        
+        # Weighted combination
+        return max(fuzzy_score, phonetic_score)
     
     def calculate_strength_similarity(self, strength1: str, strength2: str) -> float:
-        """Calculate strength similarity"""
+        """Calculate strength similarity with normalized comparison"""
         if not strength1 or not strength2:
             return 0.0
         
-        # Extract and compare numeric values
-        extract1 = self.processor.extract_strength(strength1)
-        extract2 = self.processor.extract_strength(strength2)
+        # Normalize strengths to milligrams
+        norm_strength1 = self.processor.normalize_strength(strength1)
+        norm_strength2 = self.processor.normalize_strength(strength2)
         
-        if extract1 == extract2:
-            return 1.0
+        if norm_strength1 == 0.0 or norm_strength2 == 0.0:
+            return 0.0
         
-        # Extract numbers for comparison
-        nums1 = re.findall(r'\d+\.?\d*', extract1)
-        nums2 = re.findall(r'\d+\.?\d*', extract2)
+        # Calculate similarity based on ratio
+        ratio = min(norm_strength1, norm_strength2) / max(norm_strength1, norm_strength2)
         
-        if nums1 and nums2:
-            try:
-                val1 = float(nums1[0])
-                val2 = float(nums2[0])
-                
-                if val1 == val2:
-                    return 0.9
-                
-                # Calculate relative difference
-                diff = abs(val1 - val2) / max(val1, val2)
-                return max(0, 1 - diff)
-                
-            except ValueError:
-                pass
+        # Apply sigmoid function for better scoring
+        import math
+        similarity = 1.0 / (1.0 + math.exp(-10 * (ratio - 0.8)))
         
-        # Fallback to fuzzy matching
-        return fuzz.ratio(extract1, extract2) / 100
+        return similarity
     
     def calculate_dosage_similarity(self, dosage1: str, dosage2: str) -> float:
-        """Calculate dosage form similarity"""
+        """Calculate dosage form similarity with enhanced matching"""
         if not dosage1 or not dosage2:
             return 0.0
         
-        form1 = self.processor.extract_dosage_form(dosage1)
-        form2 = self.processor.extract_dosage_form(dosage2)
+        # Normalize dosage forms
+        norm_dosage1 = self.processor.normalize_text(dosage1)
+        norm_dosage2 = self.processor.normalize_text(dosage2)
         
-        if form1 == form2:
+        # Exact match
+        if norm_dosage1 == norm_dosage2:
             return 1.0
         
-        return fuzz.ratio(form1, form2) / 100
+        # Fuzzy matching
+        fuzzy_score = fuzz.ratio(norm_dosage1, norm_dosage2) / 100.0
+        
+        # Check for similar forms (e.g., tablet vs tablets)
+        if 'TABLET' in norm_dosage1 and 'TABLET' in norm_dosage2:
+            return 0.9
+        elif 'CAPSULE' in norm_dosage1 and 'CAPSULE' in norm_dosage2:
+            return 0.9
+        elif 'INJECTION' in norm_dosage1 and 'INJECTION' in norm_dosage2:
+            return 0.9
+        
+        return fuzzy_score
     
     def get_confidence_level(self, score: float) -> str:
-        """Determine confidence level based on score"""
-        for level, threshold in Config.CONFIDENCE_THRESHOLDS.items():
-            if score >= threshold:
-                return level
-        return "Very Low" 
+        """Get confidence level based on score"""
+        if score >= 0.95:
+            return "Very High"
+        elif score >= 0.85:
+            return "High"
+        elif score >= 0.75:
+            return "Medium"
+        elif score >= 0.65:
+            return "Low"
+        else:
+            return "Very Low" 
