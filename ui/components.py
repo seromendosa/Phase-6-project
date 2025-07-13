@@ -203,22 +203,28 @@ class UIComponents:
             with col1:
                 st.write("**DHA Price Statistics:**")
                 dha_prices = pd.to_numeric(dha_df.iloc[:, 5], errors='coerce')
-                st.write(f"- Valid prices: {dha_prices.notna().sum()}/{len(dha_prices)}")
-                if dha_prices.notna().sum() > 0:
-                    st.write(f"- Average price: {dha_prices.mean():.2f}")
-                    st.write(f"- Price range: {dha_prices.min():.2f} - {dha_prices.max():.2f}")
+                if isinstance(dha_prices, pd.Series):
+                    st.write(f"- Valid prices: {dha_prices.notna().sum()}/{len(dha_prices)}")
+                    if dha_prices.notna().sum() > 0:
+                        st.write(f"- Average price: {dha_prices.mean():.2f}")
+                        st.write(f"- Price range: {dha_prices.min():.2f} - {dha_prices.max():.2f}")
+                    else:
+                        st.write("- No valid price data found")
                 else:
-                    st.write("- No valid price data found")
+                    st.write("- Could not process price data")
             
             with col2:
                 st.write("**DOH Price Statistics:**")
                 doh_prices = pd.to_numeric(doh_df.iloc[:, 5], errors='coerce')
-                st.write(f"- Valid prices: {doh_prices.notna().sum()}/{len(doh_prices)}")
-                if doh_prices.notna().sum() > 0:
-                    st.write(f"- Average price: {doh_prices.mean():.2f}")
-                    st.write(f"- Price range: {doh_prices.min():.2f} - {doh_prices.max():.2f}")
+                if isinstance(doh_prices, pd.Series):
+                    st.write(f"- Valid prices: {doh_prices.notna().sum()}/{len(doh_prices)}")
+                    if doh_prices.notna().sum() > 0:
+                        st.write(f"- Average price: {doh_prices.mean():.2f}")
+                        st.write(f"- Price range: {doh_prices.min():.2f} - {doh_prices.max():.2f}")
+                    else:
+                        st.write("- No valid price data found")
                 else:
-                    st.write("- No valid price data found")
+                    st.write("- Could not process price data")
         
         if st.button("🚀 Start Matching Process", type="primary"):
             return {

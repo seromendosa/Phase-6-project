@@ -211,10 +211,10 @@ ALTER TABLE drug_matches ADD COLUMN IF NOT EXISTS price_similarity FLOAT DEFAULT
         saved_count = 0
         processed_count = 0
         
-        for idx, dha_row in dha_df.iterrows():
-            progress = (int(idx) + 1) / total_dha
+        for idx, (_, dha_row) in enumerate(dha_df.iterrows()):
+            progress = (idx + 1) / total_dha
             progress_bar.progress(progress)
-            status_text.text(f'Processing DHA drug {int(idx) + 1} of {total_dha} (Processed: {processed_count})')
+            status_text.text(f'Processing DHA drug {idx + 1} of {total_dha} (Processed: {processed_count})')
             
             best_match = None
             best_score = 0
@@ -516,8 +516,10 @@ ALTER TABLE drug_matches ADD COLUMN IF NOT EXISTS price_similarity FLOAT DEFAULT
             
             if result is not None:
                 filtered_df, results_df = result
-                # Render download section
-                self.render_download_section(filtered_df, results_df)
+                # Ensure both are DataFrames
+                if isinstance(filtered_df, pd.DataFrame) and isinstance(results_df, pd.DataFrame):
+                    # Render download section
+                    self.render_download_section(filtered_df, results_df)
 
 def main():
     """Main entry point"""
