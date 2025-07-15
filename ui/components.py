@@ -100,6 +100,11 @@ class UIComponents:
                 else:
                     weights = Config.DEFAULT_WEIGHTS
                 
+                # TF-IDF vectorizer upload
+                st.write("**(Optional) Upload Pre-trained TF-IDF Vectorizer (.pkl):**")
+                vectorizer_file = st.file_uploader("TF-IDF Model (.pkl)", type=["pkl"], key="tfidf_vectorizer")
+                config['vectorizer_file'] = vectorizer_file
+                
                 config['matching_config'].update({
                     'threshold': threshold,
                     'weights': weights,

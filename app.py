@@ -583,6 +583,17 @@ ALTER TABLE drug_matches ADD COLUMN IF NOT EXISTS price_similarity FLOAT DEFAULT
         
         # Sidebar configuration
         sidebar_config = UIComponents.render_sidebar_config()
+
+        # Load uploaded TF-IDF vectorizer if provided
+        import pickle
+        vectorizer_file = sidebar_config.get('vectorizer_file')
+        if vectorizer_file is not None:
+            try:
+                vectorizer = pickle.load(vectorizer_file)
+                st.session_state.matcher.generic_matcher.vectorizer = vectorizer
+                st.success("TF-IDF vectorizer loaded and will be used for vector similarity!")
+            except Exception as e:
+                st.warning(f"Could not load TF-IDF vectorizer: {e}")
         
         # Handle database connection
         if sidebar_config.get('action') != 'none':
