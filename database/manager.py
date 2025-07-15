@@ -98,6 +98,8 @@ class DatabaseManager:
                 dha_dosage_form=str(drug_data.get('dosage_form', '')),
                 dha_price=safe_convert(drug_data.get('price', 0.0)),
                 dha_package_size=str(drug_data.get('package_size', drug_data.get('DHA_Package_Size', ''))),
+                dha_unit=str(drug_data.get('unit', drug_data.get('DHA_Unit', ''))),  # NEW
+                dha_unit_category=str(drug_data.get('unit_category', drug_data.get('DHA_Unit_Category', ''))),  # NEW
                 status=status,
                 doh_code=str(match_data.get('DOH_Code', '')) if match_data else None,
                 doh_brand_name=str(match_data.get('DOH_Brand_Name', '')) if match_data else None,
@@ -106,12 +108,16 @@ class DatabaseManager:
                 doh_dosage_form=str(match_data.get('DOH_Dosage_Form', '')) if match_data else None,
                 doh_price=safe_convert(match_data.get('DOH_Price', 0.0)) if match_data else None,
                 doh_package_size=str(match_data.get('DOH_Package_Size', '')) if match_data else None,
+                doh_unit=str(match_data.get('DOH_Unit', '')) if match_data else None,  # NEW
+                doh_unit_category=str(match_data.get('DOH_Unit_Category', '')) if match_data else None,  # NEW
                 brand_similarity=safe_convert(match_data.get('Brand_Similarity', 0.0)) if match_data else None,
                 generic_similarity=safe_convert(match_data.get('Generic_Similarity', 0.0)) if match_data else None,
                 strength_similarity=safe_convert(match_data.get('Strength_Similarity', 0.0)) if match_data else None,
                 dosage_similarity=safe_convert(match_data.get('Dosage_Similarity', 0.0)) if match_data else None,
                 price_similarity=safe_convert(match_data.get('Price_Similarity', 0.0)) if match_data else None,
                 package_size_similarity=safe_convert(match_data.get('Package_Size_Similarity', 0.0)) if match_data else None,
+                unit_similarity=safe_convert(match_data.get('Unit_Similarity', 0.0)) if match_data else None,  # NEW
+                unit_category_similarity=safe_convert(match_data.get('Unit_Category_Similarity', 0.0)) if match_data else None,  # NEW
                 overall_score=safe_convert(match_data.get('Overall_Score', 0.0)) if match_data else None,
                 confidence_level=str(match_data.get('Confidence_Level', '')) if match_data else None,
                 fuzzy_score=safe_convert(match_data.get('Fuzzy_Score', 0.0)) if match_data else None,
@@ -146,7 +152,9 @@ class DatabaseManager:
             'strength': match_data.get('DHA_Strength', ''),
             'dosage_form': match_data.get('DHA_Dosage_Form', ''),
             'price': match_data.get('DHA_Price', 0.0),
-            'package_size': match_data.get('DHA_Package_Size', '')
+            'package_size': match_data.get('DHA_Package_Size', ''),
+            'unit': match_data.get('DHA_Unit', ''),
+            'unit_category': match_data.get('DHA_Unit_Category', '')
         }
         self.save_drug_result(dha_drug_data, 'MATCHED', match_data, batch_id=batch_id)
     

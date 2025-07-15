@@ -23,6 +23,8 @@ class DrugResult(Base):
     dha_dosage_form = Column(String)
     dha_price = Column(Float)
     dha_package_size = Column(String, nullable=True)
+    dha_unit = Column(String, nullable=True)
+    dha_unit_category = Column(String, nullable=True)
     
     # Match Information (for matched drugs)
     doh_code = Column(String, nullable=True)
@@ -32,6 +34,8 @@ class DrugResult(Base):
     doh_dosage_form = Column(String, nullable=True)
     doh_price = Column(Float, nullable=True)
     doh_package_size = Column(String, nullable=True)
+    doh_unit = Column(String, nullable=True)
+    doh_unit_category = Column(String, nullable=True)
     
     # Similarity Scores
     brand_similarity = Column(Float, nullable=True)
@@ -40,6 +44,8 @@ class DrugResult(Base):
     dosage_similarity = Column(Float, nullable=True)
     price_similarity = Column(Float, nullable=True)
     package_size_similarity = Column(Float, nullable=True)
+    unit_similarity = Column(Float, nullable=True)
+    unit_category_similarity = Column(Float, nullable=True)
     overall_score = Column(Float, nullable=True)
     
     # Match Details
@@ -73,6 +79,8 @@ class DrugResult(Base):
             'dha_dosage_form': self.dha_dosage_form,
             'dha_price': self.dha_price,
             'dha_package_size': self.dha_package_size,
+            'dha_unit': self.dha_unit,
+            'dha_unit_category': self.dha_unit_category,
             'doh_code': self.doh_code,
             'doh_brand_name': self.doh_brand_name,
             'doh_generic_name': self.doh_generic_name,
@@ -80,12 +88,16 @@ class DrugResult(Base):
             'doh_dosage_form': self.doh_dosage_form,
             'doh_price': self.doh_price,
             'doh_package_size': self.doh_package_size,
+            'doh_unit': self.doh_unit,
+            'doh_unit_category': self.doh_unit_category,
             'brand_similarity': self.brand_similarity,
             'generic_similarity': self.generic_similarity,
             'strength_similarity': self.strength_similarity,
             'dosage_similarity': self.dosage_similarity,
             'price_similarity': self.price_similarity,
             'package_size_similarity': self.package_size_similarity,
+            'unit_similarity': self.unit_similarity,
+            'unit_category_similarity': self.unit_category_similarity,
             'overall_score': self.overall_score,
             'confidence_level': self.confidence_level,
             'fuzzy_score': self.fuzzy_score,
