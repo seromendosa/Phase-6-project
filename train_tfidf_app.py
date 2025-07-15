@@ -1,3 +1,5 @@
+#THIS WAS TAKEN TO A DIFFERNET APP TO TRAIN THE tfidf vectorizer
+
 import streamlit as st
 import pandas as pd
 import pickle
