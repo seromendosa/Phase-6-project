@@ -165,61 +165,6 @@ class EnhancedDrugTextProcessor:
         
         return 0.0
     
-    def calculate_phonetic_similarity(self, text1: str, text2: str) -> float:
-        """Calculate phonetic similarity using multiple algorithms"""
-        if not text1 or not text2:
-            return 0.0
-        
-        # Clean texts
-        clean1 = self.clean_drug_name(text1)
-        clean2 = self.clean_drug_name(text2)
-        
-        if not clean1 or not clean2:
-            return 0.0
-        
-        # Calculate multiple phonetic similarities
-        similarities = []
-        
-        # Jaro-Winkler similarity
-        try:
-            jaro_sim = jellyfish.jaro_winkler_similarity(clean1, clean2)
-            similarities.append(jaro_sim)
-        except:
-            pass
-        
-        # Soundex similarity
-        try:
-            soundex1 = jellyfish.soundex(clean1)
-            soundex2 = jellyfish.soundex(clean2)
-            soundex_sim = 1.0 if soundex1 == soundex2 else 0.0
-            similarities.append(soundex_sim)
-        except:
-            pass
-        
-        # Metaphone similarity
-        try:
-            metaphone1 = jellyfish.metaphone(clean1)
-            metaphone2 = jellyfish.metaphone(clean2)
-            metaphone_sim = 1.0 if metaphone1 == metaphone2 else 0.0
-            similarities.append(metaphone_sim)
-        except:
-            pass
-        
-        # NYSIIS similarity
-        try:
-            nysiis1 = jellyfish.nysiis(clean1)
-            nysiis2 = jellyfish.nysiis(clean2)
-            nysiis_sim = 1.0 if nysiis1 == nysiis2 else 0.0
-            similarities.append(nysiis_sim)
-        except:
-            pass
-        
-        # Return average of all similarities
-        if similarities:
-            return sum(similarities) / len(similarities)
-        
-        return 0.0
-    
     def calculate_combination_similarity(self, drug1: str, drug2: str) -> float:
         """Calculate similarity for combination drugs"""
         if not drug1 or not drug2:
@@ -239,11 +184,10 @@ class EnhancedDrugTextProcessor:
             for d2 in drugs2:
                 # Calculate multiple similarity measures
                 exact_match = 1.0 if d1 == d2 else 0.0
-                phonetic_sim = self.calculate_phonetic_similarity(d1, d2)
                 sequence_sim = SequenceMatcher(None, d1, d2).ratio()
                 
                 # Weighted combination
-                combined_sim = (exact_match * 0.5 + phonetic_sim * 0.3 + sequence_sim * 0.2)
+                combined_sim = (exact_match * 0.5 + sequence_sim * 0.5) # Removed phonetic_sim
                 row.append(combined_sim)
             similarity_matrix.append(row)
         

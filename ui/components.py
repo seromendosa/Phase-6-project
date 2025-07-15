@@ -60,6 +60,8 @@ class UIComponents:
             with st.expander("🎯 Matching Settings", expanded=True):
                 threshold = st.slider("Matching Threshold", 0.5, 1.0, Config.DEFAULT_THRESHOLD, 0.05)
                 
+                bidirectional = st.checkbox("Enable Bidirectional Matching (DHA ↔ DOH)", value=False, help="If checked, matches both DHA→DOH and DOH→DHA. If unchecked, matches only DHA→DOH.")
+                
                 st.write("**Adjust Weight Distribution:**")
                 brand_weight = st.slider("Brand Name Weight", 0.0, 1.0, Config.DEFAULT_WEIGHTS['brand'], 0.05)
                 generic_weight = st.slider("Generic Name Weight", 0.0, 1.0, Config.DEFAULT_WEIGHTS['generic'], 0.05)
@@ -67,9 +69,12 @@ class UIComponents:
                 dosage_weight = st.slider("Dosage Form Weight", 0.0, 1.0, Config.DEFAULT_WEIGHTS['dosage'], 0.05)
                 price_weight = st.slider("Price Weight", 0.0, 1.0, Config.DEFAULT_WEIGHTS['price'], 0.05)
                 package_size_weight = st.slider("Package Size Weight", 0.0, 1.0, 0.15, 0.05)
+                unit_weight = st.slider("Unit Weight", 0.0, 1.0, 0.05, 0.05)
+                unit_category_weight = st.slider("Unit Category Weight", 0.0, 1.0, 0.05, 0.05)
                 
                 # Normalize weights
-                total_weight = brand_weight + generic_weight + strength_weight + dosage_weight + price_weight + package_size_weight
+                total_weight = (brand_weight + generic_weight + strength_weight + dosage_weight +
+                                price_weight + package_size_weight + unit_weight + unit_category_weight)
                 if total_weight > 0:
                     weights = {
                         'brand': brand_weight / total_weight,
@@ -77,7 +82,9 @@ class UIComponents:
                         'strength': strength_weight / total_weight,
                         'dosage': dosage_weight / total_weight,
                         'price': price_weight / total_weight,
-                        'package_size': package_size_weight / total_weight
+                        'package_size': package_size_weight / total_weight,
+                        'unit': unit_weight / total_weight,
+                        'unit_category': unit_category_weight / total_weight
                     }
                     st.info(f"""
                     **Normalized Weights:**
@@ -87,13 +94,16 @@ class UIComponents:
                     - Dosage: {weights['dosage']:.2f}
                     - Price: {weights['price']:.2f}
                     - Package Size: {weights['package_size']:.2f}
+                    - Unit: {weights['unit']:.2f}
+                    - Unit Category: {weights['unit_category']:.2f}
                     """)
                 else:
                     weights = Config.DEFAULT_WEIGHTS
                 
                 config['matching_config'].update({
                     'threshold': threshold,
-                    'weights': weights
+                    'weights': weights,
+                    'bidirectional': bidirectional
                 })
             
             # Price matching settings
@@ -142,11 +152,11 @@ class UIComponents:
                     
                     # Show column mapping
                     st.write("**Expected columns:**")
-                    st.write("1. Drug Code, 2. Brand Name, 3. Generic Name, 4. Strength, 5. Dosage Form, 6. Price, 7. Package Size")
+                    st.write("1. Drug Code, 2. Brand Name, 3. Generic Name, 4. Strength, 5. Dosage Form, 6. Price, 7. Package Size, 8. Unit, 9. Unit Category")
                     
                     # Validate columns
-                    if len(dha_df.columns) < 7:
-                        st.warning(f"⚠️ Expected 7 columns, found {len(dha_df.columns)}. Please ensure Package Size column is included.")
+                    if len(dha_df.columns) < 9:
+                        st.warning(f"⚠️ Expected 9 columns, found {len(dha_df.columns)}. Please ensure Unit and Unit Category columns are included.")
                     
                 except Exception as e:
                     st.error(f"Error loading DHA file: {e}")
@@ -168,11 +178,11 @@ class UIComponents:
                     
                     # Show column mapping
                     st.write("**Expected columns:**")
-                    st.write("1. Drug Code, 2. Brand Name, 3. Generic Name, 4. Strength, 5. Dosage Form, 6. Price, 7. Package Size")
+                    st.write("1. Drug Code, 2. Brand Name, 3. Generic Name, 4. Strength, 5. Dosage Form, 6. Price, 7. Package Size, 8. Unit, 9. Unit Category")
                     
                     # Validate columns
-                    if len(doh_df.columns) < 7:
-                        st.warning(f"⚠️ Expected 7 columns, found {len(doh_df.columns)}. Please ensure Package Size column is included.")
+                    if len(doh_df.columns) < 9:
+                        st.warning(f"⚠️ Expected 9 columns, found {len(doh_df.columns)}. Please ensure Unit and Unit Category columns are included.")
                     
                 except Exception as e:
                     st.error(f"Error loading DOH file: {e}")
@@ -393,7 +403,8 @@ class UIComponents:
         with col2:
             st.metric("DOH Drugs", len(doh_df))
         with col3:
-            st.metric("Max Possible Matches", min(len(dha_df), len(doh_df)))
+            max_possible_matches = len(dha_df) + len(doh_df)
+            st.metric("Max Possible Matches", max_possible_matches)
         
         # Price data preview
         with st.expander("💰 Price Data Preview", expanded=False):
@@ -456,26 +467,30 @@ class UIComponents:
         matches_df = pd.DataFrame(matches)
         
         # Display summary metrics
-        col1, col2, col3, col4, col5 = st.columns(5)
-        
+        col1, col2, col3, col4, col5, col6 = st.columns(6)
+
         with col1:
             st.metric("Total Matches", len(matches))
-        
+
         with col2:
             avg_score = matches_df['Overall_Score'].mean()
             st.metric("Average Score", f"{avg_score:.3f}")
-        
+
         with col3:
             high_conf = len(matches_df[matches_df['Confidence_Level'].isin(['Very High', 'High'])])
             st.metric("High Confidence", high_conf)
-        
+
         with col4:
             avg_price_sim = matches_df['Price_Similarity'].mean()
             st.metric("Avg Price Similarity", f"{avg_price_sim:.3f}")
-        
+
         with col5:
             match_rate = len(matches) / len(dha_df) * 100
             st.metric("Match Rate", f"{match_rate:.1f}%")
+
+        with col6:
+            max_possible_matches = len(dha_df) + len(doh_df)
+            st.metric("Max Possible Matches", max_possible_matches)
         
         # Show unmatched drugs if database is connected
         if st.session_state.db_manager:

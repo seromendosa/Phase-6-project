@@ -82,15 +82,11 @@ class EnhancedGenericNameMatcher:
             except:
                 vector_score = 0.0
         
-        # Phonetic similarity
-        phonetic_score = self.processor.calculate_phonetic_similarity(query_generic, target_generic)
-        
-        # Weighted combination of scores
+        # Weighted combination of scores (redistribute weights)
         final_score = (
-            combination_sim * 0.4 +
+            combination_sim * 0.5 +
             fuzzy_score * 0.3 +
-            vector_score * 0.2 +
-            phonetic_score * 0.1
+            vector_score * 0.2
         )
         
         # Determine method used
@@ -100,8 +96,6 @@ class EnhancedGenericNameMatcher:
             method = 'fuzzy'
         elif vector_score > 0.8:
             method = 'vector'
-        elif phonetic_score > 0.8:
-            method = 'phonetic'
         else:
             method = 'combined'
         
@@ -110,7 +104,6 @@ class EnhancedGenericNameMatcher:
             'fuzzy_score': fuzzy_score,
             'vector_score': vector_score,
             'semantic_score': combination_sim,
-            'phonetic_score': phonetic_score,
             'method': method
         }
 
@@ -128,7 +121,7 @@ class EnhancedDrugMatcher:
         self.price_matcher = PriceMatcher()
         
     def calculate_brand_similarity(self, brand1: str, brand2: str) -> float:
-        """Calculate brand name similarity with enhanced processing"""
+        """Calculate brand name similarity with enhanced processing (no phonetic)"""
         if not brand1 or not brand2:
             return 0.0
         
@@ -140,14 +133,10 @@ class EnhancedDrugMatcher:
         if norm_brand1 == norm_brand2:
             return 1.0
         
-        # Fuzzy matching
+        # Fuzzy matching only
         fuzzy_score = fuzz.ratio(norm_brand1, norm_brand2) / 100.0
         
-        # Phonetic matching
-        phonetic_score = self.processor.calculate_phonetic_similarity(norm_brand1, norm_brand2)
-        
-        # Weighted combination
-        return max(fuzzy_score, phonetic_score)
+        return fuzzy_score
     
     def calculate_strength_similarity(self, strength1: str, strength2: str) -> float:
         """Calculate strength similarity with normalized comparison"""
@@ -232,6 +221,32 @@ class EnhancedDrugMatcher:
         from fuzzywuzzy import fuzz
         fuzzy_score = fuzz.ratio(str(p1_raw), str(p2_raw)) / 100.0
         return fuzzy_score
+
+    def calculate_unit_similarity(self, unit1: str, unit2: str) -> float:
+        """Calculate similarity between units (e.g., mg, ml, tablet)"""
+        if not unit1 and not unit2:
+            return 1.0
+        if not unit1 or not unit2:
+            return 0.0
+        norm1 = self.processor.normalize_text(unit1)
+        norm2 = self.processor.normalize_text(unit2)
+        if norm1 == norm2:
+            return 1.0
+        from fuzzywuzzy import fuzz
+        return fuzz.ratio(norm1, norm2) / 100.0
+
+    def calculate_unit_category_similarity(self, cat1: str, cat2: str) -> float:
+        """Calculate similarity between unit categories (e.g., solid, liquid)"""
+        if not cat1 and not cat2:
+            return 1.0
+        if not cat1 or not cat2:
+            return 0.0
+        norm1 = self.processor.normalize_text(cat1)
+        norm2 = self.processor.normalize_text(cat2)
+        if norm1 == norm2:
+            return 1.0
+        from fuzzywuzzy import fuzz
+        return fuzz.ratio(norm1, norm2) / 100.0
     
     def get_confidence_level(self, score: float) -> str:
         """
