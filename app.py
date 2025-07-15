@@ -114,8 +114,17 @@ class DrugMatchingApp:
                 
                 with col2:
                     if st.button("🔄 Recreate Table"):
-                        st.session_state.db_manager.recreate_table()
-                        st.rerun()
+                        st.session_state.show_recreate_warning = True
+                    if st.session_state.get("show_recreate_warning", False):
+                        st.warning("⚠️ This will delete ALL results in the drug_results table and cannot be undone.")
+                        confirm = st.checkbox("I understand and want to recreate the table.", key="recreate_confirm")
+                        if confirm:
+                            if st.button("✅ Confirm Table Recreation", key="confirm_recreate_btn"):
+                                st.session_state.db_manager.recreate_table()
+                                st.success("✅ drug_results table recreated successfully. All previous results have been deleted.")
+                                st.session_state.show_recreate_warning = False
+                                st.session_state.recreate_confirm = False
+                                st.rerun()
                 
                 # Manual SQL fix option
                 st.write("**Manual SQL Fix (if automatic fails):**")
@@ -135,42 +144,15 @@ ALTER TABLE drug_matches ADD COLUMN IF NOT EXISTS price_similarity FLOAT DEFAULT
         with st.spinner("Matching drugs with price analysis..."):
             start_time = datetime.now()
             
-            # Create search session if database is connected
-            session_id = None
-            if st.session_state.db_manager:
-                try:
-                    session_id = st.session_state.db_manager.create_search_session(
-                        dha_file_name=getattr(st.session_state, 'dha_file_name', 'Unknown'),
-                        doh_file_name=getattr(st.session_state, 'doh_file_name', 'Unknown'),
-                        dha_count=len(dha_df),
-                        doh_count=len(doh_df),
-                        threshold=threshold,
-                        weights=weights
-                    )
-                    st.info(f"🔍 Search session created: {session_id[:8]}...")
-                except Exception as e:
-                    st.warning(f"⚠️ Could not create search session: {str(e)}")
-            
             # Update price matcher settings
             st.session_state.matcher.price_matcher.tolerance_percentage = price_config['price_tolerance']
             st.session_state.matcher.price_matcher.max_ratio = price_config['max_price_ratio']
             
             # Perform matching
-            matches = self._match_drugs(dha_df, doh_df, threshold, weights, session_id or "")
+            matches = self._match_drugs(dha_df, doh_df, threshold, weights)
             
             end_time = datetime.now()
             processing_time = (end_time - start_time).total_seconds()
-            
-            # Update search session with final results
-            if st.session_state.db_manager and session_id:
-                try:
-                    unmatched_dha_count = st.session_state.db_manager.get_unmatched_count('DHA')
-                    unmatched_doh_count = st.session_state.db_manager.get_unmatched_count('DOH')
-                    st.session_state.db_manager.update_search_session(
-                        session_id, len(matches), unmatched_dha_count, unmatched_doh_count, processing_time
-                    )
-                except Exception as e:
-                    st.warning(f"⚠️ Could not update search session: {str(e)}")
             
             # Store matches in session state
             st.session_state.matches = matches
@@ -180,14 +162,14 @@ ALTER TABLE drug_matches ADD COLUMN IF NOT EXISTS price_similarity FLOAT DEFAULT
             st.info(f"📊 Results: {len(matches)} matches found")
             
             if st.session_state.db_manager:
-                unmatched_dha = st.session_state.db_manager.get_unmatched_count('DHA')
-                unmatched_doh = st.session_state.db_manager.get_unmatched_count('DOH')
+                unmatched_dha = st.session_state.db_manager.get_unmatched_count()
+                unmatched_doh = st.session_state.db_manager.get_unmatched_count()
                 st.info(f"📊 Unmatched: {unmatched_dha} DHA drugs, {unmatched_doh} DOH drugs")
             
             return matches
     
     def _match_drugs(self, dha_df: pd.DataFrame, doh_df: pd.DataFrame, 
-                    threshold: float, weights: Dict, session_id: str = "") -> List[Dict]:
+                    threshold: float, weights: Dict) -> List[Dict]:
         """Internal method to perform drug matching with one-to-many (all above threshold) matching"""
         matches = []
         unmatched_dha_count = 0
@@ -258,6 +240,7 @@ ALTER TABLE drug_matches ADD COLUMN IF NOT EXISTS price_similarity FLOAT DEFAULT
                 dha_strength = str(dha_row.iloc[3]) if len(dha_row) > 3 else ""
                 dha_dosage = str(dha_row.iloc[4]) if len(dha_row) > 4 else ""
                 dha_price = st.session_state.matcher.processor.clean_price(dha_row.iloc[5]) if len(dha_row) > 5 else 0.0
+                dha_package_size = str(dha_row.iloc[6]) if len(dha_row) > 6 else ""
                 
                 if len(doh_df) == 0:
                     if st.session_state.db_manager:
@@ -270,7 +253,7 @@ ALTER TABLE drug_matches ADD COLUMN IF NOT EXISTS price_similarity FLOAT DEFAULT
                             'price': dha_price
                         }
                         st.session_state.db_manager.save_unmatched_drug(
-                            dha_drug_data, 'DHA', 0.0, None, "No DOH drugs available"
+                            dha_drug_data, best_match_score=0.0, best_match_doh_code=None, search_reason="No DOH drugs available"
                         )
                     unmatched_dha_count += 1
                     processed_count += 1
@@ -289,6 +272,7 @@ ALTER TABLE drug_matches ADD COLUMN IF NOT EXISTS price_similarity FLOAT DEFAULT
                     doh_strength = str(doh_row.iloc[3]) if len(doh_row) > 3 else ""
                     doh_dosage = str(doh_row.iloc[4]) if len(doh_row) > 4 else ""
                     doh_price = st.session_state.matcher.processor.clean_price(doh_row.iloc[5]) if len(doh_row) > 5 else 0.0
+                    doh_package_size = str(doh_row.iloc[6]) if len(doh_row) > 6 else ""
                     
                     brand_sim = st.session_state.matcher.calculate_brand_similarity(dha_brand, doh_brand)
                     strength_sim = st.session_state.matcher.calculate_strength_similarity(dha_strength, doh_strength)
@@ -298,49 +282,27 @@ ALTER TABLE drug_matches ADD COLUMN IF NOT EXISTS price_similarity FLOAT DEFAULT
                         dha_generic, doh_generic, doh_generics
                     )
                     generic_sim = generic_match['final_score']
+                    package_size_sim = st.session_state.matcher.calculate_package_size_similarity(dha_package_size, doh_package_size)
 
                     applied_weights = weights.copy()
                     manual_review_flag = False
-                    if brand_sim >= 0.95:
-                        if strength_sim >= 0.95 and dosage_sim >= 0.95:
-                            applied_weights = {
-                                'brand': 0.20,
-                                'generic': 0.00,
-                                'strength': 0.40,
-                                'dosage': 0.25,
-                                'price': 0.15
-                            }
-                        else:
-                            applied_weights = {
-                                'brand': 0.20,
-                                'generic': 0.00,
-                                'strength': 0.35,
-                                'dosage': 0.30,
-                                'price': 0.15
-                            }
-                            if strength_sim < 0.8 or dosage_sim < 0.8:
-                                manual_review_flag = True
-                    elif brand_sim >= 0.90:
-                        applied_weights = {
-                            'brand': 0.20,
-                            'generic': 0.10,
-                            'strength': 0.30,
-                            'dosage': 0.25,
-                            'price': 0.15
-                        }
-                    else:
-                        applied_weights = weights.copy()
+                    # Add package size to weights if not present
+                    if 'package_size' not in applied_weights:
+                        applied_weights['package_size'] = 0.15
+                        # Reduce price weight to keep total at 1.0 if needed
+                        if 'price' in applied_weights:
+                            applied_weights['price'] = max(0.0, applied_weights['price'] - 0.10)
                     total_weight = sum(applied_weights.values())
                     if total_weight > 0:
                         for k in applied_weights:
                             applied_weights[k] = applied_weights[k] / total_weight
-
                     overall_score = (
-                        brand_sim * applied_weights['brand'] +
-                        strength_sim * applied_weights['strength'] +
-                        dosage_sim * applied_weights['dosage'] +
-                        generic_sim * applied_weights['generic'] +
-                        price_sim * applied_weights['price']
+                        brand_sim * applied_weights.get('brand', 0.0) +
+                        strength_sim * applied_weights.get('strength', 0.0) +
+                        dosage_sim * applied_weights.get('dosage', 0.0) +
+                        generic_sim * applied_weights.get('generic', 0.0) +
+                        price_sim * applied_weights.get('price', 0.0) +
+                        package_size_sim * applied_weights.get('package_size', 0.0)
                     )
 
                     if overall_score > best_score:
@@ -363,11 +325,14 @@ ALTER TABLE drug_matches ADD COLUMN IF NOT EXISTS price_similarity FLOAT DEFAULT
                             'DOH_Dosage_Form': doh_dosage,
                             'DHA_Price': float(dha_price),
                             'DOH_Price': float(doh_price),
+                            'DHA_Package_Size': dha_package_size,
+                            'DOH_Package_Size': doh_package_size,
                             'Brand_Similarity': float(round(brand_sim, 3)),
                             'Generic_Similarity': float(round(generic_sim, 3)),
                             'Strength_Similarity': float(round(strength_sim, 3)),
                             'Dosage_Similarity': float(round(dosage_sim, 3)),
                             'Price_Similarity': float(round(price_sim, 3)),
+                            'Package_Size_Similarity': float(round(package_size_sim, 3)),
                             'Overall_Score': float(round(overall_score, 3)),
                             'Confidence_Level': confidence_level,
                             'Fuzzy_Score': float(round(generic_match['fuzzy_score'], 3)),
@@ -410,7 +375,7 @@ ALTER TABLE drug_matches ADD COLUMN IF NOT EXISTS price_similarity FLOAT DEFAULT
                             }
                             search_reason = f"No matches above threshold {threshold}"
                             st.session_state.db_manager.save_unmatched_drug(
-                                dha_drug_data, 'DHA', best_score, best_doh_code, search_reason
+                                dha_drug_data, best_match_score=0.0, best_match_doh_code=None, search_reason=search_reason
                             )
                         except Exception as e:
                             st.warning(f"⚠️ Could not save unmatched DHA drug to database: {str(e)}")

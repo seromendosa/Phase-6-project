@@ -289,3 +289,68 @@ class EnhancedDrugTextProcessor:
             return float(price_str)
         except (ValueError, TypeError):
             return 0.0 
+
+    def extract_package_size(self, text: str) -> tuple:
+        """
+        Extract and normalize package size from a string.
+        Returns (amount, unit, raw_string).
+        Handles patterns like:
+        - 2x15, 10x10, 25*4
+        - 10'S BLISTER x 10
+        - 100 TABLETS (25'S BLISTER *4)
+        - 15 ML, 30, 100
+        - bottle of 100ml, strip of 10 tablets, pack of 3x10
+        - Handles parentheses, mixed delimiters, and flexible unit detection
+        """
+        if not text or pd.isna(text):
+            return (None, None, "")
+        raw = str(text).strip()
+        normalized = raw.upper().replace("'S", "")
+        import re
+        # Remove content in parentheses for main extraction, but keep for fallback
+        normalized_main = re.sub(r'\([^)]*\)', '', normalized)
+        # 1. Multiplicative pattern: 2x15, 10x10, 25*4, 3X10, 3 X 10, etc.
+        mult_match = re.findall(r'(\d+)\s*[x\*]\s*(\d+)', normalized_main)
+        if mult_match:
+            total = 1
+            for m in mult_match[0]:
+                total *= int(m)
+            # Try to find unit after the pattern or in the rest of the string
+            unit_match = re.search(r'(TABLET|CAPSULE|ML|BOTTLE|BLISTER|DROP|VIAL|AMPOULE|SYRINGE|SACHET|SUPPOSITORY|PATCH|POWDER|GRANULE|LOZENGE|SPRAY|INHALER|DOSE|PIECE|STRIP|TUBE|BAG|PACK|KIT|CARTRIDGE|PEN|DEVICE|SYRUP|SOLUTION|SUSPENSION|EMULSION|CREAM|OINTMENT|GEL|LOTION|DROPPER)', normalized_main)
+            unit = unit_match.group(1) if unit_match else None
+            return (total, unit, raw)
+        # 2. Patterns like 'bottle of 100ml', 'strip of 10 tablets', 'pack of 3x10'
+        flexible_match = re.match(r'(BOTTLE|STRIP|PACK|BOX|TUBE|BAG|KIT|CARTRIDGE|PEN|DEVICE|SACHET|BLISTER|VIAL|AMPOULE|SYRINGE|SUPPOSITORY|PATCH|POWDER|GRANULE|LOZENGE|SPRAY|INHALER|DOSE|PIECE|TABLET|CAPSULE|ML|GEL|CREAM|OINTMENT|LOTION|DROPPER)[\s\-_]*OF[\s\-_]*(\d+(?:\.\d+)?)([A-Z]*)', normalized_main)
+        if flexible_match:
+            unit = flexible_match.group(1)
+            amount = float(flexible_match.group(2))
+            subunit = flexible_match.group(3) if flexible_match.group(3) else None
+            if subunit:
+                unit = f"{unit} {subunit}"
+            return (amount, unit, raw)
+        # 3. Simple number with unit: 15 ML, 100 TABLETS, etc.
+        num_unit_match = re.match(r'(\d+(?:\.\d+)?)\s*(TABLET|CAPSULE|ML|BOTTLE|BLISTER|DROP|VIAL|AMPOULE|SYRINGE|SACHET|SUPPOSITORY|PATCH|POWDER|GRANULE|LOZENGE|SPRAY|INHALER|DOSE|PIECE|STRIP|TUBE|BAG|PACK|KIT|CARTRIDGE|PEN|DEVICE|SYRUP|SOLUTION|SUSPENSION|EMULSION|CREAM|OINTMENT|GEL|LOTION|DROPPER)?', normalized_main)
+        if num_unit_match:
+            amount = float(num_unit_match.group(1))
+            unit = num_unit_match.group(2) if num_unit_match.group(2) else None
+            return (amount, unit, raw)
+        # 4. Simple number only: 30, 100, etc.
+        num_match = re.match(r'^(\d+(?:\.\d+)?)$', normalized_main)
+        if num_match:
+            amount = float(num_match.group(1))
+            return (amount, None, raw)
+        # 5. Parentheses: try to extract from inside if main fails
+        paren_match = re.search(r'\(([^)]*)\)', normalized)
+        if paren_match:
+            inside = paren_match.group(1)
+            # Try multiplicative inside parentheses
+            mult_inside = re.findall(r'(\d+)\s*[x\*]\s*(\d+)', inside)
+            if mult_inside:
+                total = 1
+                for m in mult_inside[0]:
+                    total *= int(m)
+                unit_match = re.search(r'(TABLET|CAPSULE|ML|BOTTLE|BLISTER|DROP|VIAL|AMPOULE|SYRINGE|SACHET|SUPPOSITORY|PATCH|POWDER|GRANULE|LOZENGE|SPRAY|INHALER|DOSE|PIECE|STRIP|TUBE|BAG|PACK|KIT|CARTRIDGE|PEN|DEVICE|SYRUP|SOLUTION|SUSPENSION|EMULSION|CREAM|OINTMENT|GEL|LOTION|DROPPER)', inside)
+                unit = unit_match.group(1) if unit_match else None
+                return (total, unit, raw)
+        # 6. Fallback: return raw string
+        return (None, None, raw) 

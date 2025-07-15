@@ -18,7 +18,7 @@ class ExcelReportGenerator:
         
         buffer = io.BytesIO()
         
-        with pd.ExcelWriter(buffer, engine='xlsxwriter', mode='w') as writer:
+        with pd.ExcelWriter(buffer, engine='xlsxwriter', mode='w') as writer:  # type: ignore
             workbook = writer.book
             
             # Define formats
@@ -125,6 +125,7 @@ class ExcelReportGenerator:
                 'Average Strength Similarity',
                 'Average Dosage Similarity',
                 'Average Price Similarity',
+                'Average Package Size Similarity',
                 'Average Price Difference',
                 'Perfect Price Matches',
                 'Processing Date'
@@ -156,6 +157,7 @@ class ExcelReportGenerator:
                 f"{matches_df['Strength_Similarity'].mean():.3f}",
                 f"{matches_df['Dosage_Similarity'].mean():.3f}",
                 f"{matches_df['Price_Similarity'].mean():.3f}",
+                f"{matches_df['Package_Size_Similarity'].mean():.3f}",
                 f"{price_diff.mean():.2f}",
                 perfect_price_matches,
                 datetime.now().strftime('%Y-%m-%d %H:%M:%S')
@@ -176,7 +178,9 @@ class ExcelReportGenerator:
             unmatched_dha = dha_df[~dha_df.iloc[:, 0].astype(str).isin(matched_dha_codes)]
         else:
             unmatched_dha = dha_df
-        
+        # Ensure always DataFrame
+        if isinstance(unmatched_dha, pd.Series):
+            unmatched_dha = unmatched_dha.to_frame().T
         return unmatched_dha
     
     def _create_price_analysis(self, matches: List[Dict]) -> pd.DataFrame:

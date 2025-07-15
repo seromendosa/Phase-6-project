@@ -115,7 +115,11 @@ class EnhancedGenericNameMatcher:
         }
 
 class EnhancedDrugMatcher:
-    """Enhanced drug matcher with improved algorithms"""
+    """
+    Enhanced drug matcher with improved algorithms.
+    Compares drugs using brand, generic, strength, dosage, price, and package size.
+    Each attribute has its own similarity function. Results are combined using weighted sum.
+    """
     
     def __init__(self, db_manager=None):
         self.db_manager = db_manager
@@ -192,8 +196,48 @@ class EnhancedDrugMatcher:
         
         return fuzzy_score
     
+    def calculate_package_size_similarity(self, pkg1: str, pkg2: str) -> float:
+        """
+        Compare package sizes using numeric, unit, and fuzzy string logic.
+        - If both are numeric and units match (or are None), compare numerically with tolerance.
+        - If units differ, penalize score.
+        - If not numeric, use fuzzy string similarity.
+        - Returns a float between 0 and 1.
+        """
+        if not pkg1 and not pkg2:
+            return 1.0
+        if not pkg1 or not pkg2:
+            return 0.0
+        p1_amt, p1_unit, p1_raw = self.processor.extract_package_size(pkg1)
+        p2_amt, p2_unit, p2_raw = self.processor.extract_package_size(pkg2)
+        # If both are numeric and units match (or are None), compare numerically
+        if p1_amt is not None and p2_amt is not None:
+            if (p1_unit == p2_unit) or (p1_unit is None or p2_unit is None):
+                # Allow small tolerance (e.g., ±5%)
+                if p1_amt == 0 or p2_amt == 0:
+                    return 0.0
+                ratio = min(p1_amt, p2_amt) / max(p1_amt, p2_amt)
+                if ratio > 0.95:
+                    return 1.0
+                elif ratio > 0.85:
+                    return 0.9
+                elif ratio > 0.7:
+                    return 0.7
+                else:
+                    return ratio
+            else:
+                # Units differ, penalize
+                return 0.5 * (min(p1_amt, p2_amt) / max(p1_amt, p2_amt))
+        # If not numeric, use fuzzy string similarity
+        from fuzzywuzzy import fuzz
+        fuzzy_score = fuzz.ratio(str(p1_raw), str(p2_raw)) / 100.0
+        return fuzzy_score
+    
     def get_confidence_level(self, score: float) -> str:
-        """Get confidence level based on score"""
+        """
+        Get confidence level based on overall score.
+        Returns: 'Very High', 'High', 'Medium', 'Low', or 'Very Low'.
+        """
         if score >= 0.95:
             return "Very High"
         elif score >= 0.85:

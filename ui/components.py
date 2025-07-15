@@ -7,6 +7,7 @@ import numpy as np
 import plotly.express as px
 from typing import Dict, List, Optional
 from config import Config
+import re
 
 class UIComponents:
     """UI components for the application"""
@@ -65,18 +66,19 @@ class UIComponents:
                 strength_weight = st.slider("Strength Weight", 0.0, 1.0, Config.DEFAULT_WEIGHTS['strength'], 0.05)
                 dosage_weight = st.slider("Dosage Form Weight", 0.0, 1.0, Config.DEFAULT_WEIGHTS['dosage'], 0.05)
                 price_weight = st.slider("Price Weight", 0.0, 1.0, Config.DEFAULT_WEIGHTS['price'], 0.05)
+                package_size_weight = st.slider("Package Size Weight", 0.0, 1.0, 0.15, 0.05)
                 
                 # Normalize weights
-                total_weight = brand_weight + generic_weight + strength_weight + dosage_weight + price_weight
+                total_weight = brand_weight + generic_weight + strength_weight + dosage_weight + price_weight + package_size_weight
                 if total_weight > 0:
                     weights = {
                         'brand': brand_weight / total_weight,
                         'generic': generic_weight / total_weight,
                         'strength': strength_weight / total_weight,
                         'dosage': dosage_weight / total_weight,
-                        'price': price_weight / total_weight
+                        'price': price_weight / total_weight,
+                        'package_size': package_size_weight / total_weight
                     }
-                    
                     st.info(f"""
                     **Normalized Weights:**
                     - Brand: {weights['brand']:.2f}
@@ -84,6 +86,7 @@ class UIComponents:
                     - Strength: {weights['strength']:.2f}
                     - Dosage: {weights['dosage']:.2f}
                     - Price: {weights['price']:.2f}
+                    - Package Size: {weights['package_size']:.2f}
                     """)
                 else:
                     weights = Config.DEFAULT_WEIGHTS
@@ -139,11 +142,11 @@ class UIComponents:
                     
                     # Show column mapping
                     st.write("**Expected columns:**")
-                    st.write("1. Drug Code, 2. Brand Name, 3. Generic Name, 4. Strength, 5. Dosage Form, 6. Price")
+                    st.write("1. Drug Code, 2. Brand Name, 3. Generic Name, 4. Strength, 5. Dosage Form, 6. Price, 7. Package Size")
                     
                     # Validate columns
-                    if len(dha_df.columns) < 6:
-                        st.warning(f"⚠️ Expected 6 columns, found {len(dha_df.columns)}. Please ensure Price column is included.")
+                    if len(dha_df.columns) < 7:
+                        st.warning(f"⚠️ Expected 7 columns, found {len(dha_df.columns)}. Please ensure Package Size column is included.")
                     
                 except Exception as e:
                     st.error(f"Error loading DHA file: {e}")
@@ -165,11 +168,11 @@ class UIComponents:
                     
                     # Show column mapping
                     st.write("**Expected columns:**")
-                    st.write("1. Drug Code, 2. Brand Name, 3. Generic Name, 4. Strength, 5. Dosage Form, 6. Price")
+                    st.write("1. Drug Code, 2. Brand Name, 3. Generic Name, 4. Strength, 5. Dosage Form, 6. Price, 7. Package Size")
                     
                     # Validate columns
-                    if len(doh_df.columns) < 6:
-                        st.warning(f"⚠️ Expected 6 columns, found {len(doh_df.columns)}. Please ensure Price column is included.")
+                    if len(doh_df.columns) < 7:
+                        st.warning(f"⚠️ Expected 7 columns, found {len(doh_df.columns)}. Please ensure Package Size column is included.")
                     
                 except Exception as e:
                     st.error(f"Error loading DOH file: {e}")
@@ -188,12 +191,11 @@ class UIComponents:
         }
         
         # Check for required columns
-        if len(dha_df.columns) < 6:
-            validation_results['errors'].append("DHA file must have at least 6 columns")
+        if len(dha_df.columns) < 7:
+            validation_results['errors'].append("DHA file must have at least 7 columns (including Package Size)")
             validation_results['is_valid'] = False
-        
-        if len(doh_df.columns) < 6:
-            validation_results['errors'].append("DOH file must have at least 6 columns")
+        if len(doh_df.columns) < 7:
+            validation_results['errors'].append("DOH file must have at least 7 columns (including Package Size)")
             validation_results['is_valid'] = False
         
         if not validation_results['is_valid']:
@@ -210,32 +212,38 @@ class UIComponents:
         
         # Check for missing values in critical columns
         try:
-            dha_missing_codes = dha_df.iloc[:, 0].isna().sum()
+            dha_col0 = dha_df.iloc[:, 0]
+            dha_missing_codes = dha_col0.isna().sum() if isinstance(dha_col0, pd.Series) else 0
         except:
             dha_missing_codes = 0
-            
+        
         try:
-            dha_missing_brands = dha_df.iloc[:, 1].isna().sum()
+            dha_col1 = dha_df.iloc[:, 1]
+            dha_missing_brands = dha_col1.isna().sum() if isinstance(dha_col1, pd.Series) else 0
         except:
             dha_missing_brands = 0
-            
+        
         try:
-            dha_missing_generics = dha_df.iloc[:, 2].isna().sum()
+            dha_col2 = dha_df.iloc[:, 2]
+            dha_missing_generics = dha_col2.isna().sum() if isinstance(dha_col2, pd.Series) else 0
         except:
             dha_missing_generics = 0
         
         try:
-            doh_missing_codes = doh_df.iloc[:, 0].isna().sum()
+            doh_col0 = doh_df.iloc[:, 0]
+            doh_missing_codes = doh_col0.isna().sum() if isinstance(doh_col0, pd.Series) else 0
         except:
             doh_missing_codes = 0
-            
+        
         try:
-            doh_missing_brands = doh_df.iloc[:, 1].isna().sum()
+            doh_col1 = doh_df.iloc[:, 1]
+            doh_missing_brands = doh_col1.isna().sum() if isinstance(doh_col1, pd.Series) else 0
         except:
             doh_missing_brands = 0
-            
+        
         try:
-            doh_missing_generics = doh_df.iloc[:, 2].isna().sum()
+            doh_col2 = doh_df.iloc[:, 2]
+            doh_missing_generics = doh_col2.isna().sum() if isinstance(doh_col2, pd.Series) else 0
         except:
             doh_missing_generics = 0
         
@@ -270,7 +278,11 @@ class UIComponents:
         # Check price data quality
         dha_prices = pd.to_numeric(dha_df.iloc[:, 5], errors='coerce')
         doh_prices = pd.to_numeric(doh_df.iloc[:, 5], errors='coerce')
-        
+        # Ensure they are Series for .isna() usage
+        if not isinstance(dha_prices, pd.Series):
+            dha_prices = pd.Series(dha_prices)
+        if not isinstance(doh_prices, pd.Series):
+            doh_prices = pd.Series(doh_prices)
         dha_invalid_prices = dha_prices.isna().sum()
         doh_invalid_prices = doh_prices.isna().sum()
         
@@ -361,8 +373,8 @@ class UIComponents:
         st.header("🔍 Drug Matching Process")
         
         # Validate data structure
-        if len(dha_df.columns) < 6 or len(doh_df.columns) < 6:
-            st.error("❌ Both files must have at least 6 columns (including Price column)")
+        if len(dha_df.columns) < 7 or len(doh_df.columns) < 7:
+            st.error("❌ Both files must have at least 7 columns (including Package Size column)")
             return None
         
         # Data quality validation
