@@ -142,21 +142,19 @@ class EnhancedDrugMatcher:
         """Calculate strength similarity with normalized comparison"""
         if not strength1 or not strength2:
             return 0.0
-        
         # Normalize strengths to milligrams
         norm_strength1 = self.processor.normalize_strength(strength1)
         norm_strength2 = self.processor.normalize_strength(strength2)
-        
         if norm_strength1 == 0.0 or norm_strength2 == 0.0:
             return 0.0
-        
+        # If strengths are nearly equal (within 1 mg), return perfect match
+        if abs(norm_strength1 - norm_strength2) < 1e-2:  # 0.01 mg tolerance
+            return 1.0
         # Calculate similarity based on ratio
         ratio = min(norm_strength1, norm_strength2) / max(norm_strength1, norm_strength2)
-        
         # Apply sigmoid function for better scoring
         import math
         similarity = 1.0 / (1.0 + math.exp(-10 * (ratio - 0.8)))
-        
         return similarity
     
     def calculate_dosage_similarity(self, dosage1: str, dosage2: str) -> float:

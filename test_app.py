@@ -175,6 +175,22 @@ def test_advanced_weighting():
             assert match['Manual_Review_Flag'] is True
     print("Advanced weighting logic test passed.")
 
+def test_strength_similarity_perfect_and_imperfect():
+    from processing.matchers import EnhancedDrugMatcher
+    matcher = EnhancedDrugMatcher()
+    # Identical strengths
+    assert matcher.calculate_strength_similarity('500 mg', '500 mg') == 1.0
+    # Nearly identical strengths (within tolerance)
+    assert matcher.calculate_strength_similarity('500 mg', '500.009 mg') == 1.0
+    # Slightly different strengths (outside tolerance)
+    sim = matcher.calculate_strength_similarity('500 mg', '495 mg')
+    print(f"Similarity for 500 mg vs 495 mg: {sim}")
+    assert 0.7 < sim < 1.0
+    # Very different strengths
+    sim2 = matcher.calculate_strength_similarity('500 mg', '250 mg')
+    print(f"Similarity for 500 mg vs 250 mg: {sim2}")
+    assert sim2 < 0.7
+
 def main():
     """Run all tests"""
     print("🧪 Drug Matching System Component Tests")
